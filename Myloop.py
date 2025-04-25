@@ -2,7 +2,6 @@ import streamlit as st
 import osmnx as ox
 import networkx as nx
 import pandas as pd
-import pydeck as pdk
 import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
@@ -61,65 +60,98 @@ def export_gpx(route_df):
 # -----------------------------
 st.set_page_config(page_title="🏃 Riyadh Loop Generator", layout="centered")
 st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown("Click on the map to select your start location in **Riyadh**, set your desired distance, and generate a looped running route.")
+st.markdown("Click on the map to select your start location in **Riyadh**, then choose a loop distance.")
 
-# Map centered on Riyadh
-default_lat, default_lon = 24.7136, 46.6753
-m = folium.Map(location=[default_lat, default_lon], zoom_start=13)
-click_result = st_folium(m, height=450, returned_objects=["last_clicked"])
+# -----------------------------
+# Session state defaults
+# -----------------------------
+if "latlon" not in st.session_state:
+    st.session_state.latlon = None
+if "route_df" not in st.session_state:
+    st.session_state.route_df = None
+if "actual_km" not in st.session_state:
+    st.session_state.actual_km = None
+if "map_center" not in st.session_state:
+    st.session_state.map_center = [24.7136, 46.6753]  # Riyadh
+if "map_zoom" not in st.session_state:
+    st.session_state.map_zoom = 13
 
+# -----------------------------
+# Map Construction
+# -----------------------------
+m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+
+# Draw marker if clicked before
+if st.session_state.latlon:
+    folium.Marker(
+        location=st.session_state.latlon,
+        popup="📍 Start Point",
+        icon=folium.Icon(color="green", icon="map-marker")
+    ).add_to(m)
+
+# Draw route if exists
+if st.session_state.route_df is not None:
+    folium.PolyLine(
+        locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
+        color="blue",
+        weight=5,
+        popup="Loop Route"
+    ).add_to(m)
+
+# Show the interactive map
+click_result = st_folium(m, height=500, returned_objects=["last_clicked", "map_bounds"], key="main-map")
+
+# -----------------------------
+# Process map interaction
+# -----------------------------
+# Update map center and zoom based on user interaction
+if click_result and click_result.get("map_bounds"):
+    bounds = click_result["map_bounds"]
+    center_lat = (bounds["_northEast"]["lat"] + bounds["_southWest"]["lat"]) / 2
+    center_lon = (bounds["_northEast"]["lng"] + bounds["_southWest"]["lng"]) / 2
+    st.session_state.map_center = [center_lat, center_lon]
+
+    lat_span = abs(bounds["_northEast"]["lat"] - bounds["_southWest"]["lat"])
+    if lat_span < 0.005:
+        st.session_state.map_zoom = 17
+    elif lat_span < 0.01:
+        st.session_state.map_zoom = 16
+    elif lat_span < 0.02:
+        st.session_state.map_zoom = 15
+    else:
+        st.session_state.map_zoom = 13
+
+# Update selected point if clicked
 if click_result and click_result.get("last_clicked"):
     lat = click_result["last_clicked"]["lat"]
     lon = click_result["last_clicked"]["lng"]
-    st.success(f"📍 Selected location: ({lat:.5f}, {lon:.5f})")
+    st.session_state.latlon = (lat, lon)
+
+# -----------------------------
+# UI Logic
+# -----------------------------
+if st.session_state.latlon:
+    lat, lon = st.session_state.latlon
+    st.success(f"📍 Start: ({lat:.5f}, {lon:.5f})")
 
     distance_km = st.slider("Select loop distance (km)", 1.0, 15.0, 5.0, 0.5)
 
-    if st.button("Generate Route"):
+    if st.button("🚀 Generate Route"):
         try:
             G, route, actual_km = generate_loop_route(lat, lon, distance_km)
             coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
             route_df = pd.DataFrame(coords, columns=["lat", "lon"])
-
-            path = [[row["lon"], row["lat"]] for _, row in route_df.iterrows()]
-            path_df = pd.DataFrame([{"path": path}])
-
-            route_layer = pdk.Layer(
-                "PathLayer",
-                data=path_df,
-                get_path="path",
-                get_width=5,
-                get_color=[0, 100, 255],
-                width_min_pixels=2
-            )
-
-            point_layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=pd.DataFrame([route_df.iloc[0]]),
-                get_position=["lon", "lat"],
-                get_color=[0, 255, 0],
-                get_radius=30,
-            )
-
-            view_state = pdk.ViewState(
-                latitude=route_df["lat"].mean(),
-                longitude=route_df["lon"].mean(),
-                zoom=15,
-                pitch=0
-            )
-
-            st.pydeck_chart(pdk.Deck(initial_view_state=view_state, layers=[route_layer, point_layer]))
-            st.success(f"✅ Route generated: {actual_km:.2f} km")
-
-            gpx_data = export_gpx(route_df)
-            st.download_button(
-                label="📥 Download GPX",
-                data=gpx_data,
-                file_name="running_loop.gpx",
-                mime="application/gpx+xml"
-            )
-
+            st.session_state.route_df = route_df
+            st.session_state.actual_km = actual_km
         except Exception as e:
-            st.error(f"❌ Error: {e}")
-else:
-    st.warning("👆 Click on the map to select your start location.")
+            st.error(f"❌ Error generating route: {e}")
+
+if st.session_state.route_df is not None:
+    st.success(f"✅ Route: {st.session_state.actual_km:.2f} km")
+    gpx_data = export_gpx(st.session_state.route_df)
+    st.download_button(
+        label="📥 Download GPX",
+        data=gpx_data,
+        file_name="running_loop.gpx",
+        mime="application/gpx+xml"
+    )
