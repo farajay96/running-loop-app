@@ -9,39 +9,33 @@ from io import BytesIO
 import streamlit.components.v1 as components
 
 # -----------------------------
-# Route Generator
+# Route Generator (Smart version)
 # -----------------------------
-def generate_loop_route(start_lat, start_lon, distance_km):
-    segment_distance_km = distance_km / 4
-    east_point = (start_lat, start_lon + segment_distance_km / 111)
-    north_point = (start_lat + segment_distance_km / 111, east_point[1])
-    west_point = (north_point[0], start_lon)
+def generate_smart_loop(G, start_node, desired_distance_km, tolerance=0.10, max_cycles=500):
+    # Find simple cycles
+    cycles = list(nx.simple_cycles(G.to_directed()))
+    loops = []
 
-    G = ox.graph_from_point((start_lat, start_lon), dist=distance_km * 700, network_type='walk', simplify=True)
+    desired_distance_m = desired_distance_km * 1000
+    min_distance_m = desired_distance_m * (1 - tolerance)
+    max_distance_m = desired_distance_m * (1 + tolerance)
 
-    if len(G.nodes) < 50:
-        raise RuntimeError("Not enough roads in the selected area to generate a running loop.")
+    for cycle in cycles[:max_cycles]:
+        # Close the cycle
+        cycle.append(cycle[0])
+        try:
+            length = sum(
+                G.edges[cycle[i], cycle[i + 1], 0]['length']
+                for i in range(len(cycle) - 1)
+            )
+            if min_distance_m <= length <= max_distance_m:
+                loops.append((cycle, length))
+        except Exception:
+            continue
 
-    start_node = ox.distance.nearest_nodes(G, X=start_lon, Y=start_lat)
-    east_node = ox.distance.nearest_nodes(G, X=east_point[1], Y=east_point[0])
-    north_node = ox.distance.nearest_nodes(G, X=north_point[1], Y=north_point[0])
-    west_node = ox.distance.nearest_nodes(G, X=west_point[1], Y=start_lon)
-
-    nodes_sequence = [start_node, east_node, north_node, west_node, start_node]
-    loop_route, used_edges, total_distance_m = [], set(), 0
-
-    for i in range(len(nodes_sequence) - 1):
-        u, v = nodes_sequence[i], nodes_sequence[i + 1]
-        path = nx.shortest_path(G, u, v, weight='length')
-        segment_edges = {(path[j], path[j + 1]) for j in range(len(path) - 1)}
-        if used_edges.intersection(segment_edges):
-            raise RuntimeError("This segment reuses roads. Try increasing distance or changing location.")
-        loop_route.extend(path[:-1])
-        used_edges.update(segment_edges)
-        total_distance_m += nx.path_weight(G, path, weight='length')
-
-    loop_route.append(start_node)
-    return G, loop_route, total_distance_m / 1000
+    # Sort loops by how close they are to desired distance
+    loops.sort(key=lambda x: abs(x[1] - desired_distance_m))
+    return loops
 
 # -----------------------------
 # GPX Exporter
@@ -65,7 +59,7 @@ def export_gpx(route_df):
 # -----------------------------
 st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown("We are trying to detect your location... If it fails, please click on the map manually.")
+st.markdown("👟 **Select a neighborhood to zoom in, then click on the map to pick your starting point.**")
 
 # -----------------------------
 # Session State Setup
@@ -74,12 +68,47 @@ if "latlon" not in st.session_state:
     st.session_state.latlon = None
 if "route_df" not in st.session_state:
     st.session_state.route_df = None
-if "actual_km" not in st.session_state:
-    st.session_state.actual_km = None
+if "loops_found" not in st.session_state:
+    st.session_state.loops_found = []
 if "map_center" not in st.session_state:
     st.session_state.map_center = [24.7136, 46.6753]  # Riyadh center
 if "map_zoom" not in st.session_state:
-    st.session_state.map_zoom = 13
+    st.session_state.map_zoom = 12
+
+# -----------------------------
+# Neighborhoods
+# -----------------------------
+neighborhoods = {
+    "Al Ghadir": (24.7915, 46.6548),
+    "Al Wadi (الوادي)": (24.7906, 46.6507),
+    "Al Yasmin": (24.8240, 46.6357),
+    "Al Nakheel": (24.7528, 46.6567),
+    "Al Malaz": (24.6648, 46.7318),
+    "Al Malqa": (24.7795, 46.6182),
+    "Al Mughrizat": (24.7483, 46.7410),
+    "Al Murabba": (24.6425, 46.7134),
+    "Al Muruj": (24.7326, 46.6641),
+    "Al Rawdah": (24.7403, 46.7605),
+    "Al Rehab": (24.6789, 46.7102),
+    "Al Sulaymaniyah": (24.7075, 46.6861),
+    "Al Nuzha": (24.7687, 46.6987),
+    "Diplomatic Quarter (DQ)": (24.6662, 46.6169),
+    "King Abdullah District": (24.7292, 46.7129),
+    "King Saud University": (24.7247, 46.6278),
+    "Olaya": (24.6928, 46.6857),
+    "Al Muhammadiyah": (24.7333, 46.6437)
+}
+
+selected_neighborhood = st.selectbox(
+    "🏙️ Select Neighborhood",
+    options=list(neighborhoods.keys())
+)
+
+# Update map center immediately
+if selected_neighborhood:
+    center_lat, center_lon = neighborhoods[selected_neighborhood]
+    st.session_state.map_center = [center_lat, center_lon]
+    st.session_state.map_zoom = 15
 
 # -----------------------------
 # Build Map
@@ -103,57 +132,15 @@ if st.session_state.route_df is not None:
         popup="Loop Route"
     ).add_to(m)
 
-# -----------------------------
-# Try to get user location or manual click
-# -----------------------------
-click_result = st_folium(m, height=500, returned_objects=["last_clicked", "map_bounds", "center"], key="main-map")
+click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
 
-user_location_detected = False
-
-if click_result:
-    if click_result.get("center") and not st.session_state.latlon:
-        # First load: grab user's location if available
-        lat = click_result["center"]["lat"]
-        lon = click_result["center"]["lng"]
-        st.session_state.latlon = (lat, lon)
-        user_location_detected = True
-
-    if click_result.get("last_clicked"):
-        # If user clicks manually
-        lat = click_result["last_clicked"]["lat"]
-        lon = click_result["last_clicked"]["lng"]
-        st.session_state.latlon = (lat, lon)
-        user_location_detected = True
+if click_result and click_result.get("last_clicked"):
+    lat = click_result["last_clicked"]["lat"]
+    lon = click_result["last_clicked"]["lng"]
+    st.session_state.latlon = (lat, lon)
 
 # -----------------------------
-# Update Map View
-# -----------------------------
-if click_result and click_result.get("map_bounds"):
-    bounds = click_result["map_bounds"]
-    center_lat = (bounds["_northEast"]["lat"] + bounds["_southWest"]["lat"]) / 2
-    center_lon = (bounds["_northEast"]["lng"] + bounds["_southWest"]["lng"]) / 2
-    st.session_state.map_center = [center_lat, center_lon]
-
-    lat_span = abs(bounds["_northEast"]["lat"] - bounds["_southWest"]["lat"])
-    if lat_span < 0.0025:
-        st.session_state.map_zoom = 17
-    elif lat_span < 0.005:
-        st.session_state.map_zoom = 16
-    elif lat_span < 0.01:
-        st.session_state.map_zoom = 15
-    elif lat_span < 0.02:
-        st.session_state.map_zoom = 14
-    else:
-        st.session_state.map_zoom = 13
-
-# -----------------------------
-# Warning if no location detected
-# -----------------------------
-if not user_location_detected:
-    st.warning("👆 If location detection failed, please click on the map manually to set your start point.")
-
-# -----------------------------
-# UI
+# Generate Loops
 # -----------------------------
 if st.session_state.latlon:
     lat, lon = st.session_state.latlon
@@ -161,24 +148,44 @@ if st.session_state.latlon:
 
     distance_km = st.slider("🎯 Choose Loop Distance (km)", 1.0, 15.0, 5.0, 0.5)
 
-    if st.button("🚀 Generate Route"):
+    if st.button("🚀 Find Loops"):
         try:
-            G, route, actual_km = generate_loop_route(lat, lon, distance_km)
-            coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
-            route_df = pd.DataFrame(coords, columns=["lat", "lon"])
-            st.session_state.route_df = route_df
-            st.session_state.actual_km = actual_km
+            G = ox.graph_from_point((lat, lon), dist=distance_km * 800, network_type='walk', simplify=True)
+            start_node = ox.distance.nearest_nodes(G, lon, lat)
+
+            loops = generate_smart_loop(G, start_node, distance_km, tolerance=0.10, max_cycles=800)
+            st.session_state.loops_found = loops
+
+            if not loops:
+                st.error("❌ No loop found matching the requested distance. Try selecting a different area.")
+            else:
+                st.success(f"✅ Found {len(loops)} possible loops!")
+
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# Downloads and Upload to Komoot
+# Let user pick and download loop
 # -----------------------------
-if st.session_state.route_df is not None:
-    st.success(f"✅ Route distance: {st.session_state.actual_km:.2f} km")
+if st.session_state.loops_found:
+    loop_options = [f"Loop {i+1}: {length/1000:.2f} km" for i, (loop, length) in enumerate(st.session_state.loops_found)]
+    selected_loop_idx = st.selectbox("🛣️ Select a loop to display and download:", options=list(range(len(loop_options))), format_func=lambda x: loop_options[x])
 
-    # 📥 GPX Download
-    gpx_data = export_gpx(st.session_state.route_df)
+    selected_loop, selected_length = st.session_state.loops_found[selected_loop_idx]
+    st.success(f"✅ Selected Loop Distance: {selected_length/1000:.2f} km")
+
+    # Build route_df
+    selected_latlons = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in selected_loop]
+    route_df = pd.DataFrame(selected_latlons, columns=["lat", "lon"])
+    st.session_state.route_df = route_df
+
+    # Draw the selected loop
+    m2 = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+    folium.PolyLine(locations=route_df[["lat", "lon"]].values.tolist(), color="blue", weight=5).add_to(m2)
+    st_folium(m2, height=500, key="selected-loop-map")
+
+    # Download GPX
+    gpx_data = export_gpx(route_df)
     st.download_button(
         label="📥 Download GPX",
         data=gpx_data,
@@ -186,7 +193,7 @@ if st.session_state.route_df is not None:
         mime="application/gpx+xml"
     )
 
-    # 📲 Upload GPX to Komoot
+    # Komoot Upload Button
     if st.button("📲 Upload GPX to Komoot"):
         js = "window.open('https://www.komoot.com/upload')"
         components.html(f"<script>{js}</script>", height=0)
