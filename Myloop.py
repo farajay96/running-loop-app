@@ -6,6 +6,7 @@ import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
 from io import BytesIO
+import streamlit.components.v1 as components
 
 # -----------------------------
 # Route Generator
@@ -60,19 +61,11 @@ def export_gpx(route_df):
     return gpx_bytes.getvalue()
 
 # -----------------------------
-# Google Maps Link Builder
-# -----------------------------
-def build_google_maps_link(route_df):
-    base_url = "https://www.google.com/maps/dir/"
-    points = "/".join(f"{row['lat']},{row['lon']}" for _, row in route_df.iterrows())
-    return base_url + points
-
-# -----------------------------
 # Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="🏃 Riyadh Loop Generator", layout="centered")
+st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown("Click on the map to select your start location inside **Riyadh**, or use your current location.")
+st.markdown("We are trying to detect your location... If it fails, please click on the map manually.")
 
 # -----------------------------
 # Session State Setup
@@ -87,11 +80,6 @@ if "map_center" not in st.session_state:
     st.session_state.map_center = [24.7136, 46.6753]  # Riyadh center
 if "map_zoom" not in st.session_state:
     st.session_state.map_zoom = 13
-
-# -----------------------------
-# User Choice: Use Current Location
-# -----------------------------
-use_current_location = st.checkbox("🧭 Use my current location", value=False)
 
 # -----------------------------
 # Build Map
@@ -115,22 +103,31 @@ if st.session_state.route_df is not None:
         popup="Loop Route"
     ).add_to(m)
 
-# Render the map and capture click
+# -----------------------------
+# Try to get user location or manual click
+# -----------------------------
 click_result = st_folium(m, height=500, returned_objects=["last_clicked", "map_bounds", "center"], key="main-map")
 
-# Process logic:
-if use_current_location:
-    if click_result and click_result.get("center"):
+user_location_detected = False
+
+if click_result:
+    if click_result.get("center") and not st.session_state.latlon:
+        # First load: grab user's location if available
         lat = click_result["center"]["lat"]
         lon = click_result["center"]["lng"]
         st.session_state.latlon = (lat, lon)
-else:
-    if click_result and click_result.get("last_clicked"):
+        user_location_detected = True
+
+    if click_result.get("last_clicked"):
+        # If user clicks manually
         lat = click_result["last_clicked"]["lat"]
         lon = click_result["last_clicked"]["lng"]
         st.session_state.latlon = (lat, lon)
+        user_location_detected = True
 
-# Update map view based on bounds
+# -----------------------------
+# Update Map View
+# -----------------------------
 if click_result and click_result.get("map_bounds"):
     bounds = click_result["map_bounds"]
     center_lat = (bounds["_northEast"]["lat"] + bounds["_southWest"]["lat"]) / 2
@@ -148,6 +145,12 @@ if click_result and click_result.get("map_bounds"):
         st.session_state.map_zoom = 14
     else:
         st.session_state.map_zoom = 13
+
+# -----------------------------
+# Warning if no location detected
+# -----------------------------
+if not user_location_detected:
+    st.warning("👆 If location detection failed, please click on the map manually to set your start point.")
 
 # -----------------------------
 # UI
@@ -169,12 +172,12 @@ if st.session_state.latlon:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# Downloads and Google Maps link
+# Downloads and Upload to Komoot
 # -----------------------------
 if st.session_state.route_df is not None:
     st.success(f"✅ Route distance: {st.session_state.actual_km:.2f} km")
 
-    # GPX Download
+    # 📥 GPX Download
     gpx_data = export_gpx(st.session_state.route_df)
     st.download_button(
         label="📥 Download GPX",
@@ -183,6 +186,7 @@ if st.session_state.route_df is not None:
         mime="application/gpx+xml"
     )
 
-    # Google Maps Link
-    google_maps_url = build_google_maps_link(st.session_state.route_df)
-    st.markdown(f"[📍 Open Route in Google Maps]({google_maps_url})", unsafe_allow_html=True)
+    # 📲 Upload GPX to Komoot
+    if st.button("📲 Upload GPX to Komoot"):
+        js = "window.open('https://www.komoot.com/upload')"
+        components.html(f"<script>{js}</script>", height=0)
