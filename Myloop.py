@@ -2,68 +2,67 @@ import streamlit as st
 import osmnx as ox
 import networkx as nx
 import pandas as pd
-import numpy as np
 import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
 from io import BytesIO
 import streamlit.components.v1 as components
+from PIL import Image
 
 # -----------------------------
-# Smoothness Scoring
+# Setup Streamlit Page
 # -----------------------------
-def calculate_loop_smoothness(G, loop):
-    angles = []
-    coords = [(G.nodes[n]['x'], G.nodes[n]['y']) for n in loop]
+st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 
-    for i in range(1, len(coords) - 1):
-        a = np.array(coords[i - 1])
-        b = np.array(coords[i])
-        c = np.array(coords[i + 1])
+# Centered Logo
+logo = Image.open("logo Myloop.webp")  # Make sure this is the new WEBP logo
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image(logo, width=200)
 
-        ba = a - b
-        bc = c - b
-
-        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-        angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-        angles.append(np.degrees(angle))
-
-    total_angle_change = np.sum(np.abs(angles))
-    return total_angle_change
+st.title("🏃‍♂️ Running Loop Route Generator")
+st.markdown("👟 **Select a neighborhood, click a start point, and create your running loop!**")
 
 # -----------------------------
-# Smart Loop Generator
+# Simple Fast Loop Generator
 # -----------------------------
-def generate_smart_loops(G, start_node, desired_distance_km, tolerance=0.10, max_cycles=500):
-    cycles = list(nx.simple_cycles(G.to_directed()))
-    loops = []
+def generate_simple_loop(start_lat, start_lon, distance_km):
+    segment_km = distance_km / 4
 
-    desired_distance_m = desired_distance_km * 1000
-    min_distance_m = desired_distance_m * (1 - tolerance)
-    max_distance_m = desired_distance_m * (1 + tolerance)
+    # Compute rough points
+    east = (start_lat, start_lon + segment_km / 111)
+    north = (start_lat + segment_km / 111, east[1])
+    west = (north[0], start_lon)
 
-    for cycle in cycles[:max_cycles]:
-        cycle.append(cycle[0])
+    # Load a small road network
+    G = ox.graph_from_point((start_lat, start_lon), dist=distance_km * 600, network_type='walk', simplify=True)
+
+    start_node = ox.distance.nearest_nodes(G, start_lon, start_lat)
+    east_node = ox.distance.nearest_nodes(G, east[1], east[0])
+    north_node = ox.distance.nearest_nodes(G, north[1], north[0])
+    west_node = ox.distance.nearest_nodes(G, west[1], west[0])
+
+    nodes_sequence = [start_node, east_node, north_node, west_node, start_node]
+
+    route = []
+    total_length = 0
+
+    for i in range(len(nodes_sequence) - 1):
         try:
-            length = sum(
-                G.edges[cycle[i], cycle[i + 1], 0]['length']
-                for i in range(len(cycle) - 1)
-            )
-            if min_distance_m <= length <= max_distance_m:
-                smoothness = calculate_loop_smoothness(G, cycle)
-                loops.append((cycle, length, smoothness))
-        except Exception:
-            continue
+            path = nx.shortest_path(G, nodes_sequence[i], nodes_sequence[i + 1], weight='length')
+            route.extend(path[:-1])  # avoid duplicate nodes
+            total_length += nx.path_weight(G, path, weight='length')
+        except Exception as e:
+            raise RuntimeError(f"Path error: {e}")
 
-    # Sort by smoothness (lower = better)
-    loops.sort(key=lambda x: x[2])
-    return loops
+    route.append(start_node)
+    return G, route, total_length / 1000  # distance in km
 
 # -----------------------------
 # GPX Exporter
 # -----------------------------
 def export_gpx(route_df):
-    gpx = ET.Element("gpx", version="1.1", creator="RunningLoopApp")
+    gpx = ET.Element("gpx", version="1.1", creator="MyLoopApp")
     trk = ET.SubElement(gpx, "trk")
     trkseg = ET.SubElement(trk, "trkseg")
 
@@ -77,23 +76,14 @@ def export_gpx(route_df):
     return gpx_bytes.getvalue()
 
 # -----------------------------
-# Streamlit UI
-# -----------------------------
-st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
-st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown("👟 **Select a neighborhood to zoom in, then click on the map to pick your starting point.**")
-
-# -----------------------------
 # Session State Setup
 # -----------------------------
 if "latlon" not in st.session_state:
     st.session_state.latlon = None
 if "route_df" not in st.session_state:
     st.session_state.route_df = None
-if "loops_found" not in st.session_state:
-    st.session_state.loops_found = []
 if "map_center" not in st.session_state:
-    st.session_state.map_center = [24.7136, 46.6753]  # Riyadh center
+    st.session_state.map_center = [24.7136, 46.6753]
 if "map_zoom" not in st.session_state:
     st.session_state.map_zoom = 12
 
@@ -126,7 +116,6 @@ selected_neighborhood = st.selectbox(
     options=list(neighborhoods.keys())
 )
 
-# Update map center immediately
 if selected_neighborhood:
     center_lat, center_lon = neighborhoods[selected_neighborhood]
     st.session_state.map_center = [center_lat, center_lon]
@@ -137,7 +126,6 @@ if selected_neighborhood:
 # -----------------------------
 m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
 
-# Add marker if selected
 if st.session_state.latlon:
     folium.Marker(
         location=st.session_state.latlon,
@@ -145,13 +133,11 @@ if st.session_state.latlon:
         icon=folium.Icon(color="green", icon="map-marker")
     ).add_to(m)
 
-# Add route if exists
 if st.session_state.route_df is not None:
     folium.PolyLine(
         locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
         color="blue",
-        weight=5,
-        popup="Loop Route"
+        weight=5
     ).add_to(m)
 
 click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
@@ -162,7 +148,7 @@ if click_result and click_result.get("last_clicked"):
     st.session_state.latlon = (lat, lon)
 
 # -----------------------------
-# Generate Loops
+# Generate Route
 # -----------------------------
 if st.session_state.latlon:
     lat, lon = st.session_state.latlon
@@ -170,44 +156,23 @@ if st.session_state.latlon:
 
     distance_km = st.slider("🎯 Choose Loop Distance (km)", 1.0, 15.0, 5.0, 0.5)
 
-    if st.button("🚀 Find Loops"):
+    if st.button("🚀 Generate Running Loop"):
         try:
-            G = ox.graph_from_point((lat, lon), dist=distance_km * 800, network_type='walk', simplify=True)
-            start_node = ox.distance.nearest_nodes(G, lon, lat)
+            G, route, actual_distance_km = generate_simple_loop(lat, lon, distance_km)
+            coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
+            route_df = pd.DataFrame(coords, columns=["lat", "lon"])
+            st.session_state.route_df = route_df
 
-            loops = generate_smart_loops(G, start_node, distance_km, tolerance=0.10, max_cycles=800)
-            st.session_state.loops_found = loops
-
-            if not loops:
-                st.error("❌ No loop found matching the requested distance. Try selecting a different area.")
-            else:
-                st.success(f"✅ Found {len(loops)} possible loops! (Sorted by smoothness)")
+            st.success(f"✅ Generated loop: {actual_distance_km:.2f} km")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# Let user pick and download loop
+# Download GPX + Upload to Komoot
 # -----------------------------
-if st.session_state.loops_found:
-    loop_options = [f"Loop {i+1}: {length/1000:.2f} km (Smoothness: {smoothness:.1f})" for i, (loop, length, smoothness) in enumerate(st.session_state.loops_found)]
-    selected_loop_idx = st.selectbox("🛣️ Select a loop to display and download:", options=list(range(len(loop_options))), format_func=lambda x: loop_options[x])
-
-    selected_loop, selected_length, selected_smoothness = st.session_state.loops_found[selected_loop_idx]
-    st.success(f"✅ Selected Loop Distance: {selected_length/1000:.2f} km | Smoothness Score: {selected_smoothness:.1f}")
-
-    # Build route_df
-    selected_latlons = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in selected_loop]
-    route_df = pd.DataFrame(selected_latlons, columns=["lat", "lon"])
-    st.session_state.route_df = route_df
-
-    # Draw the selected loop
-    m2 = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
-    folium.PolyLine(locations=route_df[["lat", "lon"]].values.tolist(), color="blue", weight=5).add_to(m2)
-    st_folium(m2, height=500, key="selected-loop-map")
-
-    # Download GPX
-    gpx_data = export_gpx(route_df)
+if st.session_state.route_df is not None:
+    gpx_data = export_gpx(st.session_state.route_df)
     st.download_button(
         label="📥 Download GPX",
         data=gpx_data,
@@ -215,7 +180,6 @@ if st.session_state.loops_found:
         mime="application/gpx+xml"
     )
 
-    # Komoot Upload Button
     if st.button("📲 Upload GPX to Komoot"):
         js = "window.open('https://www.komoot.com/upload')"
         components.html(f"<script>{js}</script>", height=0)
