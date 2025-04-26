@@ -2,6 +2,7 @@ import streamlit as st
 import osmnx as ox
 import networkx as nx
 import pandas as pd
+import numpy as np
 import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
@@ -9,10 +10,31 @@ from io import BytesIO
 import streamlit.components.v1 as components
 
 # -----------------------------
-# Route Generator (Smart version)
+# Smoothness Scoring
 # -----------------------------
-def generate_smart_loop(G, start_node, desired_distance_km, tolerance=0.10, max_cycles=500):
-    # Find simple cycles
+def calculate_loop_smoothness(G, loop):
+    angles = []
+    coords = [(G.nodes[n]['x'], G.nodes[n]['y']) for n in loop]
+
+    for i in range(1, len(coords) - 1):
+        a = np.array(coords[i - 1])
+        b = np.array(coords[i])
+        c = np.array(coords[i + 1])
+
+        ba = a - b
+        bc = c - b
+
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+        angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+        angles.append(np.degrees(angle))
+
+    total_angle_change = np.sum(np.abs(angles))
+    return total_angle_change
+
+# -----------------------------
+# Smart Loop Generator
+# -----------------------------
+def generate_smart_loops(G, start_node, desired_distance_km, tolerance=0.10, max_cycles=500):
     cycles = list(nx.simple_cycles(G.to_directed()))
     loops = []
 
@@ -21,7 +43,6 @@ def generate_smart_loop(G, start_node, desired_distance_km, tolerance=0.10, max_
     max_distance_m = desired_distance_m * (1 + tolerance)
 
     for cycle in cycles[:max_cycles]:
-        # Close the cycle
         cycle.append(cycle[0])
         try:
             length = sum(
@@ -29,12 +50,13 @@ def generate_smart_loop(G, start_node, desired_distance_km, tolerance=0.10, max_
                 for i in range(len(cycle) - 1)
             )
             if min_distance_m <= length <= max_distance_m:
-                loops.append((cycle, length))
+                smoothness = calculate_loop_smoothness(G, cycle)
+                loops.append((cycle, length, smoothness))
         except Exception:
             continue
 
-    # Sort loops by how close they are to desired distance
-    loops.sort(key=lambda x: abs(x[1] - desired_distance_m))
+    # Sort by smoothness (lower = better)
+    loops.sort(key=lambda x: x[2])
     return loops
 
 # -----------------------------
@@ -153,13 +175,13 @@ if st.session_state.latlon:
             G = ox.graph_from_point((lat, lon), dist=distance_km * 800, network_type='walk', simplify=True)
             start_node = ox.distance.nearest_nodes(G, lon, lat)
 
-            loops = generate_smart_loop(G, start_node, distance_km, tolerance=0.10, max_cycles=800)
+            loops = generate_smart_loops(G, start_node, distance_km, tolerance=0.10, max_cycles=800)
             st.session_state.loops_found = loops
 
             if not loops:
                 st.error("❌ No loop found matching the requested distance. Try selecting a different area.")
             else:
-                st.success(f"✅ Found {len(loops)} possible loops!")
+                st.success(f"✅ Found {len(loops)} possible loops! (Sorted by smoothness)")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
@@ -168,11 +190,11 @@ if st.session_state.latlon:
 # Let user pick and download loop
 # -----------------------------
 if st.session_state.loops_found:
-    loop_options = [f"Loop {i+1}: {length/1000:.2f} km" for i, (loop, length) in enumerate(st.session_state.loops_found)]
+    loop_options = [f"Loop {i+1}: {length/1000:.2f} km (Smoothness: {smoothness:.1f})" for i, (loop, length, smoothness) in enumerate(st.session_state.loops_found)]
     selected_loop_idx = st.selectbox("🛣️ Select a loop to display and download:", options=list(range(len(loop_options))), format_func=lambda x: loop_options[x])
 
-    selected_loop, selected_length = st.session_state.loops_found[selected_loop_idx]
-    st.success(f"✅ Selected Loop Distance: {selected_length/1000:.2f} km")
+    selected_loop, selected_length, selected_smoothness = st.session_state.loops_found[selected_loop_idx]
+    st.success(f"✅ Selected Loop Distance: {selected_length/1000:.2f} km | Smoothness Score: {selected_smoothness:.1f}")
 
     # Build route_df
     selected_latlons = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in selected_loop]
