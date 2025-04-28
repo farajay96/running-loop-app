@@ -16,7 +16,11 @@ from streamlit_geolocation import streamlit_geolocation
 # Setup Streamlit Page
 # -----------------------------
 st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
+
+#m = folium.Map(location=[24.7136, 46.6753] , zoom_start=15)
+
 location = streamlit_geolocation()
+
 # Centered Logo
 logo = Image.open("logo Myloop.webp")
 col1, col2, col3 = st.columns([1, 2, 1])
@@ -35,25 +39,27 @@ st.markdown(
 # Detect Location from Browser
 # -----------------------------
 
-if location:
-    try:
-        st.session_state.map_center = [location["latitude"], location["longitude"]]
-        st.session_state.map_zoom = 15
-        st.session_state.location_detected = True
-        st.success("📍 Location detected successfully!")
-    except:
-        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
-        st.session_state.map_zoom = 13
-        st.warning("⚠️ Could not detect location automatically. Please click manually.")
-else:
-    if "map_center" not in st.session_state:
-        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
-        st.session_state.map_zoom = 13
+if location['latitude'] is not None:
+    st.session_state.map_center = [location["latitude"], location["longitude"]]
+    st.session_state.map_zoom = 15
+    st.session_state.location_detected = True
+    st.success("📍 Location detected successfully!")
+if location['latitude'] is None:
+    st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
+    st.session_state.map_zoom = 13
+    st.warning("⚠️ Could not detect location automatically. Please click manually.")
 
 # -----------------------------
 # Initialize Map
 # -----------------------------
-m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+# Safety net to avoid NoneType error
+if "map_zoom" not in st.session_state or st.session_state.map_zoom is None:
+    st.session_state.map_zoom = 13
+print(st.session_state.map_center)
+print("------------------------------")
+m = folium.Map(location=st.session_state.map_center , zoom_start=st.session_state.map_zoom)
+
+
 
 if "latlon" not in st.session_state:
     st.session_state.latlon = None
