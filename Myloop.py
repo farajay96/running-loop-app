@@ -8,7 +8,6 @@ import xml.etree.ElementTree as ET
 from io import BytesIO
 import streamlit.components.v1 as components
 from PIL import Image
-from geopy.geocoders import Nominatim
 
 # -----------------------------
 # Setup Streamlit Page
