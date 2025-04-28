@@ -25,53 +25,50 @@ st.title("🏃‍♂️ Running Loop Route Generator")
 st.markdown("👟 **We try to detect your location! Otherwise click manually.**")
 
 # -----------------------------
-# Detect Location from Browser
+# Detect Location
 # -----------------------------
 st.session_state.setdefault("location_detected", False)
+st.session_state.setdefault("map_center", [24.7136, 46.6753])  # Default Riyadh
+st.session_state.setdefault("map_zoom", 13)
 
-if not st.session_state["location_detected"]:
-    with st.spinner('📍 Detecting your location... Please allow location access if prompted.'):
-        components.html(
-            """
-            <script>
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    const latitude = position.coords.latitude;
-                    const longitude = position.coords.longitude;
-                    const data = {lat: latitude, lon: longitude};
-                    const queryString = new URLSearchParams({location_data: JSON.stringify(data)}).toString();
-                    window.location.search = queryString;
-                },
-                (error) => {
-                    const queryString = new URLSearchParams({location_data: "null"}).toString();
-                    window.location.search = queryString;
-                }
-            );
-            </script>
-            """,
-            height=0
-        )
+# Try to read location from URL query params
+location_param = st.query_params.get("location_data")
 
-# -----------------------------
-# Read Location from URL
-# -----------------------------
-message = st.query_params.get("location_data", None)
-
-if message:
+if location_param and not st.session_state["location_detected"]:
     try:
-        location = json.loads(message[0])
-        st.session_state.map_center = [location["lat"], location["lon"]]
+        location = json.loads(location_param[0])
+        lat = location["lat"]
+        lon = location["lon"]
+        st.session_state.map_center = [lat, lon]
         st.session_state.map_zoom = 15
         st.session_state.location_detected = True
         st.success("📍 Location detected successfully!")
-    except:
-        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
-        st.session_state.map_zoom = 13
+    except Exception as e:
         st.warning("📍 Could not detect location, defaulting to Riyadh.")
-else:
-    if "map_center" not in st.session_state:
-        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
-        st.session_state.map_zoom = 13
+
+# Inject JS code to get user's location and update URL
+components.html(
+    """
+    <script>
+    if (!window.location.search.includes("location_data")) {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const latitude = position.coords.latitude;
+                const longitude = position.coords.longitude;
+                const data = {lat: latitude, lon: longitude};
+                const queryString = new URLSearchParams({location_data: JSON.stringify(data)}).toString();
+                window.location.search = '?' + queryString;
+            },
+            (error) => {
+                const queryString = new URLSearchParams({location_data: "null"}).toString();
+                window.location.search = '?' + queryString;
+            }
+        );
+    }
+    </script>
+    """,
+    height=0
+)
 
 # -----------------------------
 # Initialize Map
@@ -171,7 +168,6 @@ if st.session_state.latlon:
             st.session_state.route_df = route_df
 
             st.success(f"✅ Generated loop: {actual_distance_km:.2f} km")
-
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
