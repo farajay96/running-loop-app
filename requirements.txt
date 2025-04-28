@@ -9,3 +9,5 @@ numpy
 pydeck
 scikit-learn
 Pillow
+streamlit-geolocation
+
