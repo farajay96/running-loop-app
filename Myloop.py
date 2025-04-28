@@ -6,7 +6,7 @@ import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
 from io import BytesIO
-import requests
+import json
 from PIL import Image
 import streamlit.components.v1 as components
 
@@ -16,29 +16,96 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 
 # Centered Logo
-logo = Image.open("logo Myloop.webp")  # Make sure this file exists
+logo = Image.open("logo Myloop.webp")
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.image(logo, width=200)
 
 st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown("👟 **Select a neighborhood, click a start point, or let us detect your location!**")
+st.markdown("👟 **We try to detect your location! Otherwise click manually.**")
 
 # -----------------------------
-# Try to detect user location by IP
+# Detect Location from Browser
 # -----------------------------
-def detect_location_by_ip():
+st.session_state.setdefault("location_detected", False)
+
+if not st.session_state["location_detected"]:
+    with st.spinner('📍 Detecting your location... Please allow location access if prompted.'):
+        components.html(
+            """
+            <script>
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    const data = {lat: latitude, lon: longitude};
+                    const queryString = new URLSearchParams({location_data: JSON.stringify(data)}).toString();
+                    window.location.search = queryString;
+                },
+                (error) => {
+                    const queryString = new URLSearchParams({location_data: "null"}).toString();
+                    window.location.search = queryString;
+                }
+            );
+            </script>
+            """,
+            height=0
+        )
+
+# -----------------------------
+# Read Location from URL
+# -----------------------------
+message = st.query_params.get("location_data", None)
+
+if message:
     try:
-        response = requests.get('https://ipapi.co/json/')
-        data = response.json()
-        lat = float(data['latitude'])
-        lon = float(data['longitude'])
-        return lat, lon
-    except Exception:
-        return None
+        location = json.loads(message[0])
+        st.session_state.map_center = [location["lat"], location["lon"]]
+        st.session_state.map_zoom = 15
+        st.session_state.location_detected = True
+        st.success("📍 Location detected successfully!")
+    except:
+        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
+        st.session_state.map_zoom = 13
+        st.warning("📍 Could not detect location, defaulting to Riyadh.")
+else:
+    if "map_center" not in st.session_state:
+        st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
+        st.session_state.map_zoom = 13
 
 # -----------------------------
-# Simple Fast Loop Generator
+# Initialize Map
+# -----------------------------
+m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+
+if "latlon" not in st.session_state:
+    st.session_state.latlon = None
+if "route_df" not in st.session_state:
+    st.session_state.route_df = None
+
+if st.session_state.latlon:
+    folium.Marker(
+        location=st.session_state.latlon,
+        popup="📍 Start Point",
+        icon=folium.Icon(color="green", icon="map-marker")
+    ).add_to(m)
+
+if st.session_state.route_df is not None:
+    folium.PolyLine(
+        locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
+        color="blue",
+        weight=5
+    ).add_to(m)
+
+click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
+
+if click_result and click_result.get("last_clicked"):
+    lat = click_result["last_clicked"]["lat"]
+    lon = click_result["last_clicked"]["lng"]
+    st.session_state.latlon = (lat, lon)
+
+# -----------------------------
+# Generate Simple Running Loop
 # -----------------------------
 def generate_simple_loop(start_lat, start_lon, distance_km):
     segment_km = distance_km / 4
@@ -71,7 +138,7 @@ def generate_simple_loop(start_lat, start_lon, distance_km):
     return G, route, total_length / 1000
 
 # -----------------------------
-# GPX Exporter
+# Export GPX
 # -----------------------------
 def export_gpx(route_df):
     gpx = ET.Element("gpx", version="1.1", creator="MyLoopApp")
@@ -88,85 +155,7 @@ def export_gpx(route_df):
     return gpx_bytes.getvalue()
 
 # -----------------------------
-# Session State Setup
-# -----------------------------
-if "latlon" not in st.session_state:
-    st.session_state.latlon = None
-if "route_df" not in st.session_state:
-    st.session_state.route_df = None
-if "map_center" not in st.session_state:
-    location = detect_location_by_ip()
-    if location:
-        st.session_state.map_center = list(location)
-        st.success(f"📍 Detected your location!")
-    else:
-        st.session_state.map_center = [24.7136, 46.6753]  # Default: Riyadh
-        st.warning("📍 Could not detect location, defaulting to Riyadh.")
-if "map_zoom" not in st.session_state:
-    st.session_state.map_zoom = 13
-
-# -----------------------------
-# Neighborhoods
-# -----------------------------
-neighborhoods = {
-    "Al Ghadir": (24.7915, 46.6548),
-    "Al Wadi (الوادي)": (24.7906, 46.6507),
-    "Al Yasmin": (24.8240, 46.6357),
-    "Al Nakheel": (24.7528, 46.6567),
-    "Al Malaz": (24.6648, 46.7318),
-    "Al Malqa": (24.7795, 46.6182),
-    "Al Mughrizat": (24.7483, 46.7410),
-    "Al Murabba": (24.6425, 46.7134),
-    "Al Muruj": (24.7326, 46.6641),
-    "Al Rawdah": (24.7403, 46.7605),
-    "Al Rehab": (24.6789, 46.7102),
-    "Al Sulaymaniyah": (24.7075, 46.6861),
-    "Al Nuzha": (24.7687, 46.6987),
-    "Diplomatic Quarter (DQ)": (24.6662, 46.6169),
-    "King Abdullah District": (24.7292, 46.7129),
-    "King Saud University": (24.7247, 46.6278),
-    "Olaya": (24.6928, 46.6857),
-    "Al Muhammadiyah": (24.7333, 46.6437)
-}
-
-selected_neighborhood = st.selectbox(
-    "🏙️ Or choose neighborhood manually:",
-    options=list(neighborhoods.keys())
-)
-
-if selected_neighborhood:
-    center_lat, center_lon = neighborhoods[selected_neighborhood]
-    st.session_state.map_center = [center_lat, center_lon]
-    st.session_state.map_zoom = 15
-
-# -----------------------------
-# Build Map
-# -----------------------------
-m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
-
-if st.session_state.latlon:
-    folium.Marker(
-        location=st.session_state.latlon,
-        popup="📍 Start Point",
-        icon=folium.Icon(color="green", icon="map-marker")
-    ).add_to(m)
-
-if st.session_state.route_df is not None:
-    folium.PolyLine(
-        locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
-        color="blue",
-        weight=5
-    ).add_to(m)
-
-click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
-
-if click_result and click_result.get("last_clicked"):
-    lat = click_result["last_clicked"]["lat"]
-    lon = click_result["last_clicked"]["lng"]
-    st.session_state.latlon = (lat, lon)
-
-# -----------------------------
-# Generate Route
+# Generate Route and Show Download
 # -----------------------------
 if st.session_state.latlon:
     lat, lon = st.session_state.latlon
@@ -187,7 +176,7 @@ if st.session_state.latlon:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# Download GPX + Upload to Komoot
+# Download GPX + Komoot Upload
 # -----------------------------
 if st.session_state.route_df is not None:
     gpx_data = export_gpx(st.session_state.route_df)
