@@ -205,17 +205,22 @@ if st.session_state.latlon:
 # -----------------------------
 # GPX Download
 # -----------------------------
-if st.session_state.route_df is not None:
-    gpx_data = export_gpx(st.session_state.route_df)
-    st.download_button(
-        label="📥 Download GPX",
-        data=gpx_data,
-        file_name="running_loop.gpx",
-        mime="application/gpx+xml"
-    )
+file_name = "running_loop.gpx"
 
-st.markdown("---")
-st.markdown("### 📲 Import Route to Komoot")
+st.download_button(
+    label="📥 Download GPX",
+    data=gpx_data,
+    file_name=file_name,
+    mime="application/gpx+xml"
+)
+
+st.success(
+    f"✅ Your route was saved as **`{file_name}`**.\n\n"
+    "📁 You can find it in your **Downloads** folder.\n"
+    "📲 On your phone, it may show up in the 'Files' or 'My Files' app under **Downloads**.\n"
+    "📤 Now upload it to [Komoot](https://www.komoot.com/upload) to use it for navigation."
+)
+
 
 st.markdown(
     """
