@@ -203,28 +203,33 @@ if st.session_state.latlon:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# GPX Download
+# GPX Download + Komoot Instructions
 # -----------------------------
-file_name = "running_loop.gpx"
+if st.session_state.route_df is not None:
+    gpx_data = export_gpx(st.session_state.route_df)
+    file_name = "running_loop.gpx"
 
-st.download_button(
-    label="📥 Download GPX File",
-    data=gpx_data,
-    file_name=file_name,
-    mime="application/gpx+xml"
-)
+    st.download_button(
+        label="📥 Download GPX File",
+        data=gpx_data,
+        file_name=file_name,
+        mime="application/gpx+xml"
+    )
 
-st.markdown("---")
-st.markdown("### 📲 Use This Route in Komoot")
+    st.markdown("---")
+    st.markdown("### 📲 Use This Route in Komoot")
 
-st.info(
-    f"""
-    ✅ Your route was saved as **`{file_name}`** in your **Downloads** folder.
+    st.info(
+        f"""
+        ✅ Your route was saved as **`{file_name}`** in your **Downloads** folder.
 
-    👉 To use it in Komoot:
-    1. Open the [Komoot Import Page](https://www.komoot.com/upload).
-    2. Upload the downloaded file manually.
+        👉 To use it in Komoot:
+        1. Open the [Komoot Import Page](https://www.komoot.com/upload).
+        2. Upload the file manually by dragging and dropping it on the page.
 
-    📱 On mobile: open the **Komoot app**, go to **Profile → Routes → Import**, and select the file from your device’s Files or Downloads app.
-    """
-)
+        📱 On mobile:
+        - Open the **Komoot app**.
+        - Go to **Profile → Routes → Import**.
+        - Select the "**`{file_name}`**" file from your phone’s **Files** or **Downloads** app.
+        """
+    )
