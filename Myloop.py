@@ -17,8 +17,6 @@ from streamlit_geolocation import streamlit_geolocation
 # -----------------------------
 st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 
-#m = folium.Map(location=[24.7136, 46.6753] , zoom_start=15)
-
 location = streamlit_geolocation()
 
 # Centered Logo
@@ -38,7 +36,6 @@ st.markdown(
 # -----------------------------
 # Detect Location from Browser
 # -----------------------------
-
 if location['latitude'] is not None:
     st.session_state.map_center = [location["latitude"], location["longitude"]]
     st.session_state.map_zoom = 15
@@ -52,26 +49,36 @@ if location['latitude'] is None:
 # -----------------------------
 # Initialize Map
 # -----------------------------
-# Safety net to avoid NoneType error
 if "map_zoom" not in st.session_state or st.session_state.map_zoom is None:
     st.session_state.map_zoom = 13
-print(st.session_state.map_center)
-print("------------------------------")
-m = folium.Map(location=st.session_state.map_center , zoom_start=st.session_state.map_zoom)
 
-
+m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+# Show a blue dot at the detected location
+if "location_detected" in st.session_state and st.session_state.location_detected:
+    folium.CircleMarker(
+        location=st.session_state.map_center,
+        radius=7,
+        color="blue",
+        fill=True,
+        fill_color="blue",
+        fill_opacity=0.8,
+        popup="📍 You are here"
+    ).add_to(m)
 
 if "latlon" not in st.session_state:
     st.session_state.latlon = None
 if "route_df" not in st.session_state:
     st.session_state.route_df = None
 
+popup_text = ""
 if st.session_state.latlon:
-    folium.Marker(
-        location=st.session_state.latlon,
-        popup="📍 Start Point",
-        icon=folium.Icon(color="green", icon="map-marker")
-    ).add_to(m)
+    if "generated_km" in st.session_state:
+        popup_text += f"<br>✅ Distance: {st.session_state.generated_km:.2f} km"
+        folium.Marker(
+            location=st.session_state.latlon,
+            popup="📍 Start Point",
+            icon=folium.Icon(color="green", icon="map-marker")
+        ).add_to(m)
 
 if st.session_state.route_df is not None:
     folium.PolyLine(
@@ -79,6 +86,22 @@ if st.session_state.route_df is not None:
         color="blue",
         weight=5
     ).add_to(m)
+
+    # Show distance label at midpoint
+    mid_idx = len(st.session_state.route_df) // 2
+    mid_point = st.session_state.route_df.iloc[mid_idx]
+    offset_lat = mid_point["lat"] + 0.0005  # shift ~55m north
+    offset_lon = mid_point["lon"] + 0.0005  # shift ~55m east
+    folium.Marker(
+        location=[offset_lat, offset_lon],
+        popup=f"🏁 Distance: {st.session_state.generated_km:.2f} km",
+        icon=folium.DivIcon(html=f"""
+            <div style="font-size: 14pt; color: black; font-weight: bold; background-color: white; padding: 2px; border-radius: 5px;">
+                {st.session_state.generated_km:.2f} km
+            </div>
+        """)
+    ).add_to(m)
+
 
 click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
 
@@ -152,14 +175,13 @@ if st.session_state.latlon:
             coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
             route_df = pd.DataFrame(coords, columns=["lat", "lon"])
             st.session_state.route_df = route_df
-
-            st.success(f"✅ Generated loop: {actual_distance_km:.2f} km")
-
+            st.session_state.generated_km = actual_distance_km
+            st.rerun()
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
 # -----------------------------
-# GPX Download + Komoot Upload
+# GPX Download
 # -----------------------------
 if st.session_state.route_df is not None:
     gpx_data = export_gpx(st.session_state.route_df)
@@ -169,7 +191,3 @@ if st.session_state.route_df is not None:
         file_name="running_loop.gpx",
         mime="application/gpx+xml"
     )
-
-    if st.button("📲 Upload GPX to Komoot"):
-        js = "window.open('https://www.komoot.com/upload')"
-        components.html(f"<script>{js}</script>", height=0)
