@@ -28,17 +28,22 @@ st.markdown(
     """
     👟 **Welcome to the Running Loop Generator**
 
-    📍 To start from your current location:
-    - Click the **white square with a crosshair icon** in the **top-left corner of the page** (not the map).
-    - This allows us to detect and use your GPS location.
-    - A **blue dot will appear on the map** once your location is detected.
+    This app helps you create a looped running route of your desired distance, starting from your current location or any point you choose.
 
-    ✍️ You can also **click anywhere on the map** to manually select your starting point.
+    ### 🧭 How It Works:
+    1. **Allow location access** by clicking the white crosshair button at the top-left corner of this page.
+    2. A **blue dot** will appear on the map — that’s your detected starting location.
+    3. **Optionally click on the map** to change the start point.
+    4. Use the **slider** to choose how far you want to run.
+    5. Click **"🚀 Generate Running Loop"**.
+    6. A loop route will be drawn on the map.
+    7. Click **"📥 Download GPX File"** to save the route.
+    8. Follow the instructions to **import it into Komoot** for navigation.
 
-    🧭 After selecting a start point, use the slider to choose your desired loop distance.  
-    We’ll generate a loop route that best matches it.
+    You’re now ready to create your loop. Scroll down and get started 👇
     """
 )
+
 
 
 
