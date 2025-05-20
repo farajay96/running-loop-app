@@ -29,7 +29,7 @@ st.markdown(
     👟 **Welcome to the Running Loop Generator**
 
     📍 To start from your current location:
-    - Click the **white square with a black crosshair icon** in the **top-left corner of the page** (not the map).
+    - Click the **white square with a crosshair icon** in the **top-left corner of the page** (not the map).
     - This allows us to detect and use your GPS location.
     - A **blue dot will appear on the map** once your location is detected.
 
@@ -213,3 +213,31 @@ if st.session_state.route_df is not None:
         file_name="running_loop.gpx",
         mime="application/gpx+xml"
     )
+
+st.markdown("---")
+st.markdown("### 📲 Import Route to Komoot")
+
+st.markdown(
+    """
+    1. Click the button below to open the [Komoot Route Import Page](https://www.komoot.com/upload).
+    2. Drag and drop the downloaded `.gpx` file to upload it.
+    """
+)
+
+komoot_html = """
+<a href="https://www.komoot.com/upload" target="_blank">
+    <button style="
+        background-color:#2DB67C;
+        border:none;
+        color:white;
+        padding:10px 20px;
+        font-size:16px;
+        border-radius:8px;
+        cursor:pointer;
+    ">
+        🚀 Open Komoot and Upload Route
+    </button>
+</a>
+"""
+
+st.components.v1.html(komoot_html, height=60)
