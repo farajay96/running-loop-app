@@ -208,41 +208,23 @@ if st.session_state.latlon:
 file_name = "running_loop.gpx"
 
 st.download_button(
-    label="📥 Download GPX",
+    label="📥 Download GPX File",
     data=gpx_data,
     file_name=file_name,
     mime="application/gpx+xml"
 )
 
-st.success(
-    f"✅ Your route was saved as **`{file_name}`**.\n\n"
-    "📁 You can find it in your **Downloads** folder.\n"
-    "📲 On your phone, it may show up in the 'Files' or 'My Files' app under **Downloads**.\n"
-    "📤 Now upload it to [Komoot](https://www.komoot.com/upload) to use it for navigation."
-)
+st.markdown("---")
+st.markdown("### 📲 Use This Route in Komoot")
 
+st.info(
+    f"""
+    ✅ Your route was saved as **`{file_name}`** in your **Downloads** folder.
 
-st.markdown(
+    👉 To use it in Komoot:
+    1. Open the [Komoot Import Page](https://www.komoot.com/upload).
+    2. Upload the downloaded file manually.
+
+    📱 On mobile: open the **Komoot app**, go to **Profile → Routes → Import**, and select the file from your device’s Files or Downloads app.
     """
-    1. Click the button below to open the [Komoot Route Import Page](https://www.komoot.com/upload).
-    2. Drag and drop the downloaded `.gpx` file to upload it.
-    """
 )
-
-komoot_html = """
-<a href="https://www.komoot.com/upload" target="_blank">
-    <button style="
-        background-color:#2DB67C;
-        border:none;
-        color:white;
-        padding:10px 20px;
-        font-size:16px;
-        border-radius:8px;
-        cursor:pointer;
-    ">
-        🚀 Open Komoot and Upload Route
-    </button>
-</a>
-"""
-
-st.components.v1.html(komoot_html, height=60)
