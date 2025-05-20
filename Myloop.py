@@ -26,10 +26,22 @@ with col2:
 st.title("🏃‍♂️ Running Loop Route Generator")
 st.markdown(
     """
-    👟 **We try to detect your location!**  
-    📍 If no location popup appears, please **click manually** on the map to select your start point.
+    👟 **Welcome to the Running Loop Generator**
+
+    📍 To start from your current location:
+    - Click the **white square with a black crosshair icon** in the **top-left corner of the page** (not the map).
+    - This allows us to detect and use your GPS location.
+    - A **blue dot will appear on the map** once your location is detected.
+
+    ✍️ You can also **click anywhere on the map** to manually select your starting point.
+
+    🧭 After selecting a start point, use the slider to choose your desired loop distance.  
+    We’ll generate a loop route that best matches it.
     """
 )
+
+
+
 
 # -----------------------------
 # Detect Location from Browser
@@ -106,6 +118,9 @@ if click_result and click_result.get("last_clicked"):
     lat = click_result["last_clicked"]["lat"]
     lon = click_result["last_clicked"]["lng"]
     st.session_state.latlon = (lat, lon)
+# If user hasn't clicked and no latlon set, use detected location
+if st.session_state.latlon is None and st.session_state.get("location_detected"):
+    st.session_state.latlon = tuple(st.session_state.map_center)
 
 # -----------------------------
 # Generate Simple Running Loop
