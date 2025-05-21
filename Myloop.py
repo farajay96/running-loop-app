@@ -6,7 +6,6 @@ import folium
 from streamlit_folium import st_folium
 import xml.etree.ElementTree as ET
 from io import BytesIO
-import json
 from PIL import Image
 from streamlit_geolocation import streamlit_geolocation
 
@@ -15,120 +14,16 @@ from streamlit_geolocation import streamlit_geolocation
 # -----------------------------
 st.set_page_config(page_title="🏃 Running Loop Generator", layout="centered")
 
-location = streamlit_geolocation()
-
-# Centered Logo
+# Load Logo
 logo = Image.open("logo Myloop.webp")
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.image(logo, width=200)
 
-st.title("🏃‍♂️ Running Loop Route Generator")
-st.markdown(
-    """
-    👟 **Welcome to the Running Loop Generator**
-
-    This app helps you create a looped running route of your desired distance, starting from your current location or any point you choose.
-
-    ### 🧭 How It Works:
-    1. **Allow location access** by clicking the white crosshair button at the top-left corner of this page.
-    2. A **blue dot** will appear on the map — that’s your detected starting location.
-    3. **Optionally click on the map** to change the start point.
-    4. Use the **slider** to choose how far you want to run.
-    5. Click **"🚀 Generate Running Loop"**.
-    6. A loop route will be drawn on the map.
-    7. Click **"📥 Download GPX File"** to save the route.
-    8. Follow the instructions to **import it into Komoot** for navigation.
-
-    You’re now ready to create your loop. Scroll down and get started 👇
-    """
-)
-
-
-
-
+st.title(":running: Running Loop Route Generator")
 
 # -----------------------------
-# Detect Location from Browser
-# -----------------------------
-if location['latitude'] is not None:
-    st.session_state.map_center = [location["latitude"], location["longitude"]]
-    st.session_state.map_zoom = 15
-    st.session_state.location_detected = True
-    st.success("📍 Location detected successfully!")
-else:
-    st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
-    st.session_state.map_zoom = 13
-    st.warning("⚠️ Could not detect location automatically. Please click manually.")
-
-# -----------------------------
-# Initialize Map
-# -----------------------------
-if "map_zoom" not in st.session_state:
-    st.session_state.map_zoom = 13
-if "latlon" not in st.session_state:
-    st.session_state.latlon = None
-if "route_df" not in st.session_state:
-    st.session_state.route_df = None
-
-m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
-
-# Blue dot for user location
-if st.session_state.get("location_detected"):
-    folium.CircleMarker(
-        location=st.session_state.map_center,
-        radius=7,
-        color="blue",
-        fill=True,
-        fill_color="blue",
-        fill_opacity=0.8,
-        popup="📍 You are here"
-    ).add_to(m)
-
-# Start point marker
-if st.session_state.latlon:
-    folium.Marker(
-        location=st.session_state.latlon,
-        popup="📍 Start Point",
-        icon=folium.Icon(color="green", icon="map-marker")
-    ).add_to(m)
-
-# Draw route and label
-if st.session_state.route_df is not None:
-    folium.PolyLine(
-        locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
-        color="blue",
-        weight=5
-    ).add_to(m)
-
-    # Offset label so it's readable
-    mid_idx = len(st.session_state.route_df) // 2
-    mid_point = st.session_state.route_df.iloc[mid_idx]
-    offset_lat = mid_point["lat"] + 0.0005
-    offset_lon = mid_point["lon"] + 0.0005
-
-    folium.Marker(
-        location=[offset_lat, offset_lon],
-        popup=f"🏁 Distance: {st.session_state.generated_km:.2f} km",
-        icon=folium.DivIcon(html=f"""
-            <div style="font-size: 14pt; color: black; font-weight: bold; background-color: white; padding: 2px; border-radius: 5px;">
-                {st.session_state.generated_km:.2f} km
-            </div>
-        """)
-    ).add_to(m)
-
-click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
-
-if click_result and click_result.get("last_clicked"):
-    lat = click_result["last_clicked"]["lat"]
-    lon = click_result["last_clicked"]["lng"]
-    st.session_state.latlon = (lat, lon)
-# If user hasn't clicked and no latlon set, use detected location
-if st.session_state.latlon is None and st.session_state.get("location_detected"):
-    st.session_state.latlon = tuple(st.session_state.map_center)
-
-# -----------------------------
-# Generate Simple Running Loop
+# Route Generation Functions
 # -----------------------------
 def generate_simple_loop(start_lat, start_lon, distance_km):
     segment_km = distance_km / 4
@@ -158,9 +53,6 @@ def generate_simple_loop(start_lat, start_lon, distance_km):
     route.append(start_node)
     return G, route, total_length / 1000
 
-# -----------------------------
-# Iterative Wrapper to Match Target Distance
-# -----------------------------
 def find_best_loop(lat, lon, target_km, tolerance=0.15, max_attempts=10):
     for i in range(max_attempts):
         scale = 1 - (0.04 * i)
@@ -171,11 +63,8 @@ def find_best_loop(lat, lon, target_km, tolerance=0.15, max_attempts=10):
                 return G, route, actual_km
         except Exception:
             continue
-    return G, route, actual_km  # fallback
+    return G, route, actual_km
 
-# -----------------------------
-# GPX Exporter
-# -----------------------------
 def export_gpx(route_df):
     gpx = ET.Element("gpx", version="1.1", creator="MyLoopApp")
     trk = ET.SubElement(gpx, "trk")
@@ -189,14 +78,94 @@ def export_gpx(route_df):
     return gpx_bytes.getvalue()
 
 # -----------------------------
-# Generate Route and Allow Download
+# Step 1: Detect Location
+# -----------------------------
+st.subheader("Step 1: Detect Your Location")
+location = streamlit_geolocation()
+
+if location['latitude'] is not None:
+    st.session_state.map_center = [location["latitude"], location["longitude"]]
+    st.session_state.map_zoom = 15
+    st.session_state.location_detected = True
+    st.success("Location detected. Scroll down to select a start point or use your current one.")
+else:
+    st.session_state.map_center = [24.7136, 46.6753]  # Riyadh fallback
+    st.session_state.map_zoom = 13
+    st.warning("Couldn't detect location automatically. You can click on the map to select a start point.")
+
+# -----------------------------
+# Step 2: Select Start Point
+# -----------------------------
+st.subheader("Step 2: Select a Starting Point")
+
+if "map_zoom" not in st.session_state:
+    st.session_state.map_zoom = 13
+if "latlon" not in st.session_state:
+    st.session_state.latlon = None
+if "route_df" not in st.session_state:
+    st.session_state.route_df = None
+
+m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+
+if st.session_state.get("location_detected"):
+    folium.CircleMarker(
+        location=st.session_state.map_center,
+        radius=7,
+        color="blue",
+        fill=True,
+        fill_color="blue",
+        fill_opacity=0.8,
+        popup="You are here"
+    ).add_to(m)
+
+if st.session_state.latlon:
+    folium.Marker(
+        location=st.session_state.latlon,
+        popup="Start Point",
+        icon=folium.Icon(color="green", icon="map-marker")
+    ).add_to(m)
+
+if st.session_state.route_df is not None:
+    folium.PolyLine(
+        locations=st.session_state.route_df[["lat", "lon"]].values.tolist(),
+        color="blue",
+        weight=5
+    ).add_to(m)
+
+    mid_idx = len(st.session_state.route_df) // 2
+    mid_point = st.session_state.route_df.iloc[mid_idx]
+    offset_lat = mid_point["lat"] + 0.0005
+    offset_lon = mid_point["lon"] + 0.0005
+
+    folium.Marker(
+        location=[offset_lat, offset_lon],
+        popup=f"Distance: {st.session_state.generated_km:.2f} km",
+        icon=folium.DivIcon(html=f"""
+            <div style='font-size: 14pt; color: black; background-color: white; padding: 2px; border-radius: 5px;'>
+                {st.session_state.generated_km:.2f} km
+            </div>
+        """)
+    ).add_to(m)
+
+click_result = st_folium(m, height=500, returned_objects=["last_clicked"], key="main-map")
+
+if click_result and click_result.get("last_clicked"):
+    lat = click_result["last_clicked"]["lat"]
+    lon = click_result["last_clicked"]["lng"]
+    st.session_state.latlon = (lat, lon)
+
+if st.session_state.latlon is None and st.session_state.get("location_detected"):
+    st.session_state.latlon = tuple(st.session_state.map_center)
+
+# -----------------------------
+# Step 3: Choose Distance and Generate Route
 # -----------------------------
 if st.session_state.latlon:
+    st.subheader("Step 3: Choose Loop Distance")
     lat, lon = st.session_state.latlon
-    st.success(f"📍 Selected Point: ({lat:.5f}, {lon:.5f})")
-    distance_km = st.slider("🎯 Choose Loop Distance (km)", 1.0, 15.0, 5.0, 0.5)
+    distance_km = st.slider("Choose Loop Distance (km)", 1.0, 15.0, 5.0, 0.5)
 
-    if st.button("🚀 Generate Running Loop"):
+    if st.button("Generate Running Loop"):
         try:
             G, route, actual_distance_km = find_best_loop(lat, lon, distance_km)
             coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
@@ -205,36 +174,37 @@ if st.session_state.latlon:
             st.session_state.generated_km = actual_distance_km
             st.rerun()
         except Exception as e:
-            st.error(f"❌ Error: {e}")
+            st.error(f"Error: {e}")
 
 # -----------------------------
-# GPX Download + Komoot Instructions
+# Step 4: Download + Komoot Instructions
 # -----------------------------
 if st.session_state.route_df is not None:
     gpx_data = export_gpx(st.session_state.route_df)
     file_name = "running_loop.gpx"
 
-    st.download_button(
-        label="📥 Download GPX File",
+    st.subheader("Step 4: Download and Use in Komoot")
+    download_clicked = st.download_button(
+        label="Download GPX File",
         data=gpx_data,
         file_name=file_name,
         mime="application/gpx+xml"
     )
 
-    st.markdown("---")
-    st.markdown("### 📲 Use This Route in Komoot")
+    if download_clicked:
+        st.markdown("---")
+        st.info(
+            f"""
+            Your route was saved as **`{file_name}`** in your **Downloads** folder.
 
-    st.info(
-        f"""
-        ✅ Your route was saved as **`{file_name}`** in your **Downloads** folder.
+            To use it in Komoot:
+            1. Open [komoot.com/upload](https://www.komoot.com/upload)
+            2. Upload the file manually.
 
-        👉 To use it in Komoot:
-        1. Open the [Komoot Import Page](https://www.komoot.com/upload).
-        2. Upload the file manually by dragging and dropping it on the page.
-
-        📱 On mobile:
-        - Open the **Komoot app**.
-        - Go to **Profile → Routes → Import**.
-        - Select the "**`{file_name}`**" file from your phone’s **Files** or **Downloads** app.
-        """
-    )
+            On mobile:
+            - Open the **Komoot app**
+            - Go to **Profile → Routes → Import**
+            - Select the file from your **Files** or **Downloads** folder.
+            """
+        )
+        st.markdown("---")
